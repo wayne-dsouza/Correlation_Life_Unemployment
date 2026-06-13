@@ -57,14 +57,34 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whoop_data"
 # OAuth
 # ---------------------------------------------------------------------------
 
+CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whoop_credentials.json")
+
+
 def get_credentials():
     client_id = os.environ.get("WHOOP_CLIENT_ID")
     client_secret = os.environ.get("WHOOP_CLIENT_SECRET")
+    if client_id and client_secret:
+        return client_id, client_secret
+
+    if os.path.exists(CREDENTIALS_FILE):
+        with open(CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+        if creds.get("client_id") and creds.get("client_secret"):
+            return creds["client_id"], creds["client_secret"]
+
+    print("No WHOOP credentials found - let's save them now.")
+    print("(They come from your app at https://developer-dashboard.whoop.com)")
+    client_id = input("Client ID: ").strip()
+    client_secret = input("Client Secret: ").strip()
     if not client_id or not client_secret:
-        sys.exit(
-            "Missing credentials. Set WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET "
-            "environment variables (see the setup notes at the top of this file)."
-        )
+        sys.exit("Both Client ID and Client Secret are required.")
+    with open(CREDENTIALS_FILE, "w") as f:
+        json.dump({"client_id": client_id, "client_secret": client_secret}, f, indent=2)
+    try:
+        os.chmod(CREDENTIALS_FILE, 0o600)
+    except OSError:
+        pass
+    print(f"Saved to {CREDENTIALS_FILE} (gitignored).\n")
     return client_id, client_secret
 
 
@@ -108,8 +128,29 @@ def wait_for_auth_code(expected_state):
     return result["code"]
 
 
-def authorize(client_id, client_secret):
-    """Full browser login flow. Returns a token dict."""
+def manual_auth_code(url, expected_state):
+    """Phone-friendly flow: user opens the link anywhere, then pastes the
+    redirect URL (or just the code) back into the terminal.
+
+    After approving on WHOOP you land on a localhost page that fails to
+    load - that's expected. The code we need is in that page's address bar.
+    """
+    print("Open this link (on any device) and log in to WHOOP:\n")
+    print(f"  {url}\n")
+    print("After you approve, your browser will try to open a localhost page")
+    print("that won't load - that's fine. Copy the FULL URL from the address")
+    print("bar (it contains ?code=...) and paste it here.\n")
+    pasted = input("Paste the redirect URL (or just the code): ").strip()
+    if "code=" in pasted:
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(pasted).query)
+        if params.get("state", [expected_state])[0] != expected_state:
+            sys.exit("State mismatch - please rerun and use the freshly printed link.")
+        return params["code"][0]
+    return pasted  # assume they pasted the bare code
+
+
+def authorize(client_id, client_secret, manual=False):
+    """Full login flow. Returns a token dict."""
     state = secrets.token_urlsafe(16)
     params = {
         "response_type": "code",
@@ -119,10 +160,13 @@ def authorize(client_id, client_secret):
         "state": state,
     }
     url = f"{AUTH_URL}?{urllib.parse.urlencode(params)}"
-    print("Opening your browser to log in to WHOOP...")
-    print(f"If it doesn't open, visit:\n  {url}\n")
-    webbrowser.open(url)
-    code = wait_for_auth_code(state)
+    if manual:
+        code = manual_auth_code(url, state)
+    else:
+        print("Opening your browser to log in to WHOOP...")
+        print(f"If it doesn't open, visit:\n  {url}\n")
+        webbrowser.open(url)
+        code = wait_for_auth_code(state)
 
     response = requests.post(TOKEN_URL, data={
         "grant_type": "authorization_code",
@@ -157,7 +201,7 @@ def save_tokens(tokens):
         pass
 
 
-def get_access_token():
+def get_access_token(manual=False):
     """Return a valid access token, refreshing or re-authorizing as needed."""
     client_id, client_secret = get_credentials()
 
@@ -178,7 +222,7 @@ def get_access_token():
             except requests.HTTPError:
                 print("Token refresh failed, starting a fresh login...")
 
-    tokens = authorize(client_id, client_secret)
+    tokens = authorize(client_id, client_secret, manual=manual)
     save_tokens(tokens)
     return tokens["access_token"]
 
@@ -243,6 +287,8 @@ def main():
     parser = argparse.ArgumentParser(description="Pull WHOOP data to CSV files.")
     parser.add_argument("--days", type=int, default=90, help="how many days back to fetch (default 90)")
     parser.add_argument("--all", action="store_true", help="fetch the full history instead")
+    parser.add_argument("--manual", action="store_true",
+                        help="phone/headless login: prints the WHOOP link and lets you paste the code back")
     args = parser.parse_args()
 
     start = None
@@ -252,7 +298,7 @@ def main():
     else:
         print("Fetching your full WHOOP history (this can take a while)...")
 
-    token = get_access_token()
+    token = get_access_token(manual=args.manual)
     os.makedirs(DATA_DIR, exist_ok=True)
 
     profile = api_get("/v2/user/profile/basic", token)

@@ -14,14 +14,9 @@ with pandas / Claude.
 3. Enable all read scopes (recovery, cycles, sleep, workout, profile, body
    measurement) and **offline** (needed so you don't have to log in every time).
 4. Install dependencies: `pip install requests pandas matplotlib`
-5. Set your credentials (from the dashboard) as environment variables:
-
-   ```bash
-   export WHOOP_CLIENT_ID="..."
-   export WHOOP_CLIENT_SECRET="..."
-   ```
-
-   On Windows PowerShell: `$env:WHOOP_CLIENT_ID="..."` etc.
+5. Have your Client ID and Client Secret from the dashboard ready - the first
+   run prompts for them and saves them to `whoop_credentials.json` (gitignored).
+   Alternatively set `WHOOP_CLIENT_ID` / `WHOOP_CLIENT_SECRET` env vars.
 
 ### Usage
 
@@ -29,10 +24,16 @@ with pandas / Claude.
 python whoop_connector.py             # last 90 days
 python whoop_connector.py --days 365  # last year
 python whoop_connector.py --all       # full history
+python whoop_connector.py --manual    # on a phone / headless machine
 ```
 
 The first run opens your browser to authorize the app; after that, tokens are
 cached in `.whoop_tokens.json` and refreshed automatically.
+
+With `--manual` (for phones or remote/headless machines) it instead prints the
+WHOOP login link - open it on any device, approve, and when the browser lands
+on a `localhost` page that fails to load, copy that page's full URL from the
+address bar and paste it back into the prompt.
 
 Output files in `whoop_data/` (gitignored, since it's personal health data):
 

@@ -1,5 +1,6 @@
 # WHOOP connector secrets and personal health data - never commit these
 .whoop_tokens.json
+whoop_credentials.json
 whoop_data/
 
 __pycache__/
